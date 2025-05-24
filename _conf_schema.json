@@ -1,0 +1,55 @@
+{
+    "api_key": {
+        "description": "OpenAI API密钥",
+        "type": "string",
+        "hint": "请输入你的OpenAI API密钥"
+    },
+    "system_prompt": {
+        "description": "系统提示词",
+        "type": "string",
+        "default": "你是一个有帮助的AI助手。",
+        "hint": "设置AI的角色和行为方式"
+    },
+    "context_length": {
+        "description": "上下文消息数量",
+        "type": "int",
+        "default": 10,
+        "hint": "保留的历史消息数量，用于维持对话上下文"
+    },
+    "api_url": {
+        "description": "API接口地址",
+        "type": "string",
+        "default": "https://www.gpt4novel.com/api/xiaoshuoai/ext/v1/chat/completions",
+        "hint": "OpenAI兼容的API接口地址"
+    },
+    "model": {
+        "description": "使用的模型",
+        "type": "string",
+        "default": "nalang-turbo-v23",
+        "hint": "要使用的AI模型名称"
+    },
+    "temperature": {
+        "description": "温度参数",
+        "type": "float",
+        "default": 0.7,
+        "hint": "控制回复的随机性，0-1之间"
+    },
+    "max_tokens": {
+        "description": "最大token数",
+        "type": "int",
+        "default": 800,
+        "hint": "单次回复的最大token数量"
+    },
+    "top_p": {
+        "description": "Top-p参数",
+        "type": "float",
+        "default": 0.35,
+        "hint": "核采样参数，0-1之间"
+    },
+    "repetition_penalty": {
+        "description": "重复惩罚",
+        "type": "float",
+        "default": 1.05,
+        "hint": "避免重复内容的惩罚系数"
+    }
+}
