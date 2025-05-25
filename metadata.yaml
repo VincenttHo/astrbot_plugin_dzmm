@@ -1,6 +1,6 @@
 name: astrbot_plugin_dzmm
 desc: Astrbot AI聊天插件，支持上下文对话和自定义配置
 help: 输入 /dzmm [内容] 与AI聊天，支持上下文对话
-version: v1.0.0
+version: v1.0.1
 author: Assistant
-repo: https://github.com/user/astrbot_plugin_dzmm
+repo: https://github.com/VincentHo/astrbot_plugin_dzmm
