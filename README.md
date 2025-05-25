@@ -1,3 +1,10 @@
+<div align="center">
+
+![:name](https://count.getloli.com/@astrbot_plugin_dzmm?name=astrbot_plugin_dzmm&theme=nixietube-1&padding=7&offset=0&align=top&scale=1&pixelated=1&darkmode=auto)
+
+</div>
+
+
 # astrbot_plugin_dzmm
 
 DZMM聊天插件，支持上下文对话和自定义配置。默认使用dzmm的免费试用模型，能每天50条消息。
