@@ -1,14 +1,26 @@
 {
     "api_key": {
-        "description": "OpenAI API密钥",
+        "description": "OpenAI API密钥（兼容旧版本）",
         "type": "string",
-        "hint": "请输入你的OpenAI API密钥"
+        "hint": "请输入你的OpenAI API密钥，建议使用api_keys配置多个密钥"
     },
     "system_prompt": {
-        "description": "系统提示词",
+        "description": "系统提示词（兼容旧版本）",
         "type": "string",
         "default": "你是一个有帮助的AI助手。",
-        "hint": "设置AI的角色和行为方式"
+        "hint": "设置AI的角色和行为方式，建议使用personas配置多个角色"
+    },
+    "personas": {
+        "description": "多个系统提示词配置（JSON格式）",
+        "type": "string",
+        "default": "{\"default\": \"你是一个有帮助的AI助手。\", \"programmer\": \"你是一个专业的程序员，擅长解决编程问题和代码优化。\", \"teacher\": \"你是一个耐心的老师，善于用简单易懂的方式解释复杂概念。\", \"translator\": \"你是一个专业的翻译，能够准确翻译各种语言。\"}",
+        "hint": "配置多个命名的系统提示词，JSON格式：{\"角色名\": \"提示词内容\"}"
+    },
+    "api_keys": {
+        "description": "多个API密钥配置（JSON格式）",
+        "type": "string",
+        "default": "{\"default\": \"\"}",
+        "hint": "配置多个命名的API密钥，JSON格式：{\"密钥名\": \"密钥内容\"}"
     },
     "context_length": {
         "description": "上下文消息数量",
