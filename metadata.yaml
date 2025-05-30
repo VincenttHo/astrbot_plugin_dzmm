@@ -1,6 +1,6 @@
 name: astrbot_plugin_dzmm
-desc: Astrbot AI聊天插件，支持上下文对话和自定义配置
+desc: DZMM聊天插件，适配了DZMM返回的格式，并避免与AstrBot的模型混用，可用特别命令唤起DZMM的模型进行"有趣生动"的互动聊天。
 help: 输入 /dzmm [内容] 与AI聊天，支持上下文对话
-version: v1.0.1
+version: v1.0.2
 author: Assistant
 repo: https://github.com/VincenttHo/astrbot_plugin_dzmm

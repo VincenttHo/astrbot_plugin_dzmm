@@ -1,15 +1,4 @@
 {
-    "api_key": {
-        "description": "OpenAI API密钥（兼容旧版本）",
-        "type": "string",
-        "hint": "请输入你的OpenAI API密钥，建议使用api_keys配置多个密钥"
-    },
-    "system_prompt": {
-        "description": "系统提示词（兼容旧版本）",
-        "type": "string",
-        "default": "你是一个有帮助的AI助手。",
-        "hint": "设置AI的角色和行为方式，建议使用personas配置多个角色"
-    },
     "personas": {
         "description": "多个系统提示词配置（JSON格式）",
         "type": "string",
@@ -63,5 +52,17 @@
         "type": "float",
         "default": 1.05,
         "hint": "避免重复内容的惩罚系数"
+    },
+    "show_nickname": {
+        "description": "在群聊中显示用户昵称",
+        "type": "bool",
+        "default": true,
+        "hint": "是否在群聊消息中包含用户昵称，帮助AI区分不同用户"
+    },
+    "group_shared_context": {
+        "description": "群聊共享上下文",
+        "type": "bool",
+        "default": true,
+        "hint": "是否在群聊中让所有成员共享聊天上下文"
     }
 }

@@ -25,8 +25,8 @@ import concurrent.futures
 @register(
     "astrbot_plugin_dzmm",
     "Assistant",
-    "Astrbot AI聊天插件，支持上下文对话、多角色和多API密钥配置",
-    "1.0.1",
+    "DZMM AI聊天插件，支持智能用户隔离、昵称识别、多角色和多API密钥配置",
+    "1.0.2",
     "https://github.com/user/astrbot_plugin_dzmm",
 )
 class PluginDzmm(Star):
@@ -42,6 +42,10 @@ class PluginDzmm(Star):
         self.max_tokens = self.config.get("max_tokens", 800)
         self.top_p = self.config.get("top_p", 0.35)
         self.repetition_penalty = self.config.get("repetition_penalty", 1.05)
+
+        # 新增配置选项
+        self.show_nickname = self.config.get("show_nickname", True)
+        self.group_shared_context = self.config.get("group_shared_context", True)
 
         # 多角色配置
         self.personas = self._parse_json_config("personas", {
@@ -108,21 +112,75 @@ class PluginDzmm(Star):
         return default_value
 
     def get_user_key(self, event: AstrMessageEvent) -> str:
-        """生成用户唯一标识"""
-        user_id = event.get_sender_id() or "unknown"
-        group_id = event.get_group_id() or "private"
-        platform = event.get_platform_name() or "unknown"
-        return f"{platform}_{group_id}_{user_id}"
+        """生成用户唯一标识
 
-    def add_to_context(self, user_key: str, role: str, content: str):
+        根据配置决定群聊是否共享上下文：
+        - 群聊且启用共享：使用群组ID作为标识，所有群成员共享上下文
+        - 群聊但禁用共享：使用用户ID作为标识，每个用户独立上下文
+        - 私聊：使用用户ID作为标识，每个用户独立上下文
+        """
+        group_id = event.get_group_id()
+        platform = event.get_platform_name() or "unknown"
+        user_id = event.get_sender_id() or "unknown"
+
+        if group_id and group_id != "private" and self.group_shared_context:
+            # 群聊且启用共享上下文：所有成员共享上下文
+            return f"{platform}_group_{group_id}"
+        else:
+            # 私聊或群聊但禁用共享：用户独立上下文
+            return f"{platform}_private_{user_id}"
+
+    def get_user_nickname(self, event: AstrMessageEvent) -> str:
+        """获取用户昵称"""
+        # 使用astrbot官方API获取用户昵称
+        try:
+            nickname = event.get_sender_name()
+            if nickname:
+                return nickname
+        except Exception as e:
+            logger.warning(f"DZMM插件: 获取用户昵称失败: {str(e)}")
+
+        # 如果获取昵称失败，使用用户ID作为备选
+        try:
+            sender_id = event.get_sender_id()
+            if sender_id:
+                return f"用户{sender_id}"
+        except Exception as e:
+            logger.warning(f"DZMM插件: 获取用户ID失败: {str(e)}")
+
+        return "匿名用户"
+
+    def add_to_context(self, user_key: str, role: str, content: str, nickname: str = None):
         """添加消息到用户上下文"""
-        self.user_contexts[user_key].append({"role": role, "content": content})
+        if role == "user" and nickname and self.show_nickname:
+            # 判断是否为群聊模式
+            is_group_chat = "_group_" in user_key
+            if is_group_chat:
+                # 群聊模式：添加昵称信息
+                formatted_content = f"[{nickname}]: {content}"
+            else:
+                # 私聊模式：不添加昵称
+                formatted_content = content
+        else:
+            formatted_content = content
+
+        self.user_contexts[user_key].append({"role": role, "content": formatted_content})
 
     def get_context_messages(self, user_key: str) -> List[dict]:
         """获取用户的上下文消息"""
         # 获取用户当前使用的角色
         current_persona = self.user_current_persona[user_key]
-        system_prompt = self.personas.get(current_persona, self.personas.get("default", "你是一个有帮助的AI助手。"))
+        base_prompt = self.personas.get(current_persona, self.personas.get("default", "你是一个有帮助的AI助手。"))
+
+        # 判断是否为群聊
+        is_group_chat = "_group_" in user_key
+
+        if is_group_chat:
+            # 群聊模式：添加群聊相关的指导
+            system_prompt = f"{base_prompt}\n\n（注意：关于聊天场景设定，这是一个群聊环境，可能会存在多个用户与你进行互动，你称呼用户时需要通过昵称区分，用户消息会以 `[昵称]: 消息内容` 的格式显示。请根据不同用户的昵称来区分发言者，并可以在回复中提及具体的用户昵称。）"
+        else:
+            # 私聊模式：使用原始提示词
+            system_prompt = base_prompt
 
         messages = [{"role": "system", "content": system_prompt}]
         messages.extend(list(self.user_contexts[user_key]))
@@ -273,8 +331,11 @@ class PluginDzmm(Star):
             return
 
         # 普通聊天处理
-        # 添加用户消息到上下文
-        self.add_to_context(user_key, "user", content)
+        # 获取用户昵称
+        nickname = self.get_user_nickname(event)
+
+        # 添加用户消息到上下文（包含昵称信息）
+        self.add_to_context(user_key, "user", content, nickname)
 
         # 获取完整的消息列表
         messages = self.get_context_messages(user_key)
@@ -369,12 +430,30 @@ class PluginDzmm(Star):
     async def dzmm_status(self, event: AstrMessageEvent):
         """显示当前状态"""
         user_key = self.get_user_key(event)
+        nickname = self.get_user_nickname(event)
 
         current_persona = self.user_current_persona[user_key]
         current_key = self.user_current_api_key[user_key]
         context_count = len(self.user_contexts[user_key])
+
+        # 判断聊天模式
+        group_id = event.get_group_id()
+
+        if group_id and group_id != "private":
+            if self.group_shared_context:
+                chat_mode = "群聊模式（共享上下文）"
+            else:
+                chat_mode = "群聊模式（独立上下文）"
+        else:
+            chat_mode = "私聊模式"
+
+        nickname_status = "启用" if self.show_nickname else "禁用"
+
         yield event.plain_result(
             f"当前状态：\n"
+            f"• 聊天模式：{chat_mode}\n"
+            f"• 当前用户：{nickname}\n"
+            f"• 昵称显示：{nickname_status}\n"
             f"• 使用角色：{current_persona}\n"
             f"• 使用API密钥：{current_key}\n"
             f"• 上下文消息数：{context_count}/{self.context_length}"
