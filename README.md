@@ -23,7 +23,8 @@ DZMM（网址：dzmm.ai）是一个中文AI角色扮演平台，融合先进AI�
 🔔 **它旗下的nalang-turbo-v23模型有每天免费额度，可以每天50条消息。**
 
 使用效果图：
-![使用效果图]([/assets/img/philly-magic-garden.jpg](https://github.com/VincenttHo/astrbot_plugin_dzmm/blob/main/sample.jpg) "使用效果图")
+
+![使用效果图](https://raw.githubusercontent.com/VincenttHo/astrbot_plugin_dzmm/refs/heads/main/sample.jpg)
 
 ## 功能特点
 
