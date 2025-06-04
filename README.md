@@ -7,7 +7,23 @@
 
 # astrbot_plugin_dzmm
 
-DZMM聊天插件，支持上下文对话和自定义配置。默认使用dzmm的免费试用模型，能每天50条消息。
+DZMM聊天插件，支持上下文对话和自定义配置。默认使用dzmm的免费试用模型nalang-turbo-v23，能每天50条消息。
+
+## DZMM是什么？
+
+DZMM（网址：dzmm.ai）是一个中文AI角色扮演平台，融合先进AI技术与创意写作，旨在为用户提供沉浸式的角色互动体验。
+
+它旗下所自研的模型：Nalang针对角色扮演进行优化，有如下优点：
+- ✅ 中文优化好：对中文语境理解优于多数开源模型，适合角色扮演类场景。
+- ✅ 长记忆能力：支持较长上下文对话，保持人设稳定。
+- ✅ 情绪表达自然：角色语气丰富，情绪细腻，适合沉浸式对话。
+- ✅ 训练在国内语料上：对网络流行语、常见角色设定接受度高。
+- ✅ 可以进行一些不可描述的互动（你懂的）。
+
+🔔 **它旗下的nalang-turbo-v23模型有每天免费额度，可以每天50条消息。**
+
+使用效果图：
+![使用效果图]([/assets/img/philly-magic-garden.jpg](https://github.com/VincenttHo/astrbot_plugin_dzmm/blob/main/sample.jpg) "使用效果图")
 
 ## 功能特点
 
@@ -19,6 +35,47 @@ DZMM聊天插件，支持上下文对话和自定义配置。默认使用dzmm的
 - 🔑 **多API密钥支持**，可配置多个API密钥并随时切换
 - ⚙️ 丰富的配置选项，支持自定义系统提示词
 - 🔧 支持多种AI模型和参数调节
+
+## 配置说明
+
+### 必须配置 <font color='red'>（重要）</font>
+
+#### API密钥配置 (api_keys)
+api_key是用于访问DZMM模型的重要配置，支持多个key配置，采用json格式配置，例子如下：
+```json
+{
+  "default": "your-primary-key-here",
+  "backup": "your-backup-key-here",
+  "premium": "your-premium-key-here"
+}
+```
+🔔 **注意：key请在DZMM官网获取，获取界面在“充值”-“API”中**
+
+#### 多角色配置 (personas)
+在astrbot配置界面中，personas字段应该填入JSON字符串：
+```json
+{
+  "default": "你是一个有帮助的AI助手。",
+  "programmer": "你是一个专业的程序员，擅长解决编程问题和代码优化。",
+  "teacher": "你是一个耐心的老师，善于用简单易懂的方式解释复杂概念。",
+  "translator": "你是一个专业的翻译，能够准确翻译各种语言。",
+  "creative": "你是一个富有创意的作家，善于创作故事和文案。"
+}
+```
+🔔 **可以参考项目中的[sample_persona.json](https://github.com/VincenttHo/astrbot_plugin_dzmm/blob/main/sample_persona.json)，里面有我写好的一些角色卡，感兴趣的可以直接拿来用。**
+
+### 可选配置
+
+- **system_prompt**: 系统提示词，默认为"你是一个有帮助的AI助手。"
+- **context_length**: 上下文消息数量，默认为10条
+- **api_url**: API接口地址，默认为gpt4novel接口
+- **model**: 使用的模型，默认为"nalang-turbo-v23"
+- **temperature**: 温度参数（0-1），控制回复的随机性，默认0.7
+- **max_tokens**: 最大token数，默认800
+- **top_p**: Top-p参数（0-1），默认0.35
+- **repetition_penalty**: 重复惩罚系数，默认1.05
+- **show_nickname**: 在群聊中发送给AI时显示用户昵称，默认true
+- **group_shared_context**: 群聊共享上下文，默认true
 
 ## 使用方法
 
@@ -59,51 +116,6 @@ DZMM聊天插件，支持上下文对话和自定义配置。默认使用dzmm的
 # 状态查看和清理
 /dzmm_status                      # 查看当前状态
 /dzmm_clear                       # 清除聊天上下文
-```
-
-## 配置说明
-
-在astrbot的插件配置中，你可以设置以下参数：
-
-### 必需配置
-
-- **api_key**: OpenAI API密钥（必须配置，请自行在DZMM官网注册并获取，获取界面在“充值”-“API”中）
-
-### 可选配置
-
-- **system_prompt**: 系统提示词，默认为"你是一个有帮助的AI助手。"
-- **context_length**: 上下文消息数量，默认为10条
-- **api_url**: API接口地址，默认为gpt4novel接口
-- **model**: 使用的模型，默认为"nalang-turbo-v23"
-- **temperature**: 温度参数（0-1），控制回复的随机性，默认0.7
-- **max_tokens**: 最大token数，默认800
-- **top_p**: Top-p参数（0-1），默认0.35
-- **repetition_penalty**: 重复惩罚系数，默认1.05
-- **show_nickname**: 在群聊中发送给AI时显示用户昵称，默认true
-- **group_shared_context**: 群聊共享上下文，默认true
-
-### 新功能配置
-
-#### 多角色配置 (personas)
-在astrbot配置界面中，personas字段应该填入JSON字符串：
-```json
-{
-  "default": "你是一个有帮助的AI助手。",
-  "programmer": "你是一个专业的程序员，擅长解决编程问题和代码优化。",
-  "teacher": "你是一个耐心的老师，善于用简单易懂的方式解释复杂概念。",
-  "translator": "你是一个专业的翻译，能够准确翻译各种语言。",
-  "creative": "你是一个富有创意的作家，善于创作故事和文案。"
-}
-```
-
-#### 多API密钥配置 (api_keys)
-在astrbot配置界面中，api_keys字段应该填入JSON字符串：
-```json
-{
-  "default": "sk-your-primary-key-here",
-  "backup": "sk-your-backup-key-here",
-  "premium": "sk-your-premium-key-here"
-}
 ```
 
 ## 特性说明
