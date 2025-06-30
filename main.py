@@ -20,14 +20,18 @@ from typing import Dict, List, Optional
 from collections import defaultdict, deque
 import asyncio
 import concurrent.futures
+import schedule
+import threading
+import time
+from datetime import datetime
 
 
 @register(
     "astrbot_plugin_dzmm",
     "Assistant",
-    "DZMM AI聊天插件，支持智能用户隔离、昵称识别、多角色和多API密钥配置",
-    "1.0.2",
-    "https://github.com/user/astrbot_plugin_dzmm",
+    "DZMM AI聊天插件，支持智能用户隔离、昵称识别、多角色和多API密钥配置，新增自动密钥切换功能",
+    "1.0.3",
+    "https://github.com/VincenttHo/astrbot_plugin_dzmm",
 )
 class PluginDzmm(Star):
     def __init__(self, context: Context, config: dict):
@@ -74,6 +78,13 @@ class PluginDzmm(Star):
         # 用户当前使用的角色和API密钥
         self.user_current_persona: Dict[str, str] = defaultdict(lambda: "default")
         self.user_current_api_key: Dict[str, str] = defaultdict(lambda: "default")
+        
+        # API密钥使用状态跟踪
+        self.api_key_failures: Dict[str, int] = defaultdict(int)  # 记录每个key的连续失败次数
+        self.max_failures_before_switch = max(1, min(10, self.config.get("max_failures_before_switch", 3)))  # 连续失败多少次后切换key，限制在1-10之间
+        
+        # 初始化定时任务
+        self._init_scheduler()
 
         # 验证API密钥
         if not self.api_keys or not any(self.api_keys.values()):
@@ -190,9 +201,74 @@ class PluginDzmm(Star):
         """获取用户当前使用的API密钥"""
         current_key_name = self.user_current_api_key[user_key]
         return self.api_keys.get(current_key_name, self.api_keys.get("default", ""))
+    
+    def get_next_available_key(self, user_key: str) -> Optional[str]:
+        """获取下一个可用的API密钥"""
+        current_key_name = self.user_current_api_key[user_key]
+        key_names = list(self.api_keys.keys())
+        
+        if not key_names:
+            return None
+            
+        # 找到当前key在列表中的位置
+        try:
+            current_index = key_names.index(current_key_name)
+        except ValueError:
+            current_index = -1
+            
+        # 从下一个key开始尝试，如果到末尾则从头开始
+        for i in range(len(key_names)):
+            next_index = (current_index + 1 + i) % len(key_names)
+            next_key_name = key_names[next_index]
+            
+            # 如果这个key的失败次数少于阈值，就使用它
+            if self.api_key_failures[next_key_name] < self.max_failures_before_switch:
+                return next_key_name
+                
+        # 如果所有key都失败了，重置失败计数并返回第一个key
+        logger.warning("DZMM插件: 所有API密钥都已达到失败阈值，重置失败计数")
+        self.api_key_failures.clear()
+        return key_names[0] if key_names else None
+    
+    def switch_to_next_key(self, user_key: str) -> bool:
+        """切换到下一个可用的API密钥"""
+        next_key = self.get_next_available_key(user_key)
+        if next_key and next_key != self.user_current_api_key[user_key]:
+            old_key = self.user_current_api_key[user_key]
+            self.user_current_api_key[user_key] = next_key
+            logger.info(f"DZMM插件: 自动切换API密钥 {old_key} -> {next_key}")
+            return True
+        return False
+    
+    def _init_scheduler(self):
+        """初始化定时任务"""
+        # 设置每天凌晨1点重置失败计数
+        schedule.every().day.at("01:00").do(self._reset_all_key_failures)
+        
+        # 启动定时任务线程
+        def run_scheduler():
+            while True:
+                schedule.run_pending()
+                time.sleep(60)  # 每分钟检查一次
+        
+        scheduler_thread = threading.Thread(target=run_scheduler, daemon=True)
+        scheduler_thread.start()
+        
+        logger.info("定时任务已启动，将在每天凌晨1点重置API密钥失败计数")
+    
+    def _reset_all_key_failures(self):
+        """重置所有API密钥的失败计数"""
+        self.api_key_failures.clear()
+        logger.info(f"[{datetime.now().strftime('%Y-%m-%d %H:%M:%S')}] 已重置所有API密钥的失败计数")
 
-    def _sync_chat_with_ai(self, messages: List[dict], api_key: str) -> Optional[str]:
-        """同步版本的AI聊天函数，支持完整的消息历史"""
+    def _sync_chat_with_ai(self, messages: List[dict], api_key: str) -> tuple[Optional[str], bool]:
+        """同步版本的AI聊天函数，支持完整的消息历史
+        
+        Returns:
+            tuple: (response_content, is_key_error)
+            - response_content: AI的回复内容，失败时为None
+            - is_key_error: 是否是API密钥相关的错误（如使用次数超限）
+        """
         import requests
         import json
 
@@ -215,6 +291,17 @@ class PluginDzmm(Star):
 
         try:
             with requests.post(self.api_url, headers=headers, json=request_body, stream=True) as response:
+                # 检查HTTP状态码
+                if response.status_code == 401:
+                    logger.warning(f"DZMM插件: API密钥认证失败 (401)")
+                    return None, True
+                elif response.status_code == 429:
+                    logger.warning(f"DZMM插件: API使用次数超限 (429)")
+                    return None, True
+                elif response.status_code == 403:
+                    logger.warning(f"DZMM插件: API访问被拒绝 (403)")
+                    return None, True
+                
                 response.raise_for_status()
 
                 for line_bytes in response.iter_lines():
@@ -232,6 +319,24 @@ class PluginDzmm(Star):
 
                             try:
                                 json_data = json.loads(json_data_str)
+                                
+                                # 检查是否有错误信息
+                                if "error" in json_data:
+                                    error_info = json_data["error"]
+                                    error_code = error_info.get("code", "")
+                                    error_message = error_info.get("message", "")
+                                    
+                                    # 检查是否是密钥相关错误
+                                    if any(keyword in error_message.lower() for keyword in 
+                                          ["quota", "limit", "exceeded", "insufficient", "balance", "credit"]):
+                                        logger.warning(f"DZMM插件: API密钥使用限制错误: {error_message}")
+                                        return None, True
+                                    elif "invalid" in error_message.lower() and "key" in error_message.lower():
+                                        logger.warning(f"DZMM插件: API密钥无效错误: {error_message}")
+                                        return None, True
+                                    else:
+                                        logger.error(f"DZMM插件: API返回错误: {error_message}")
+                                        return None, True
 
                                 if json_data.get("completed"):
                                     break
@@ -248,37 +353,85 @@ class PluginDzmm(Star):
                                     logger.warning(f"DZMM插件: 解析JSON时出错: '{json_data_str}'")
 
             if all_content_parts:
-                return "".join(all_content_parts)
+                return "".join(all_content_parts), False
             else:
-                return None
+                return None, False
 
         except requests.exceptions.RequestException as e:
-            logger.error(f"DZMM插件: 请求错误: {str(e)}")
-            return None
+            error_msg = str(e)
+            # 检查是否是密钥相关的网络错误
+            if any(keyword in error_msg.lower() for keyword in ["401", "403", "429", "unauthorized", "forbidden"]):
+                logger.error(f"DZMM插件: API密钥相关的请求错误: {error_msg}")
+                return None, True
+            else:
+                logger.error(f"DZMM插件: 网络请求错误: {error_msg}")
+                return None, False
         except Exception as e:
             logger.error(f"DZMM插件: 发生未知错误: {str(e)}")
-            return None
+            return None, False
 
     async def chat_with_ai(self, messages: List[dict], user_key: str) -> Optional[str]:
-        """调用AI接口进行聊天"""
-        api_key = self.get_current_api_key(user_key)
-        if not api_key:
+        """调用AI接口进行聊天，支持自动key切换"""
+        if not self.api_keys or not any(self.api_keys.values()):
             return "错误：未配置API密钥，请联系管理员配置插件"
 
-        try:
-            # 在线程池中运行同步函数
-            loop = asyncio.get_event_loop()
-            with concurrent.futures.ThreadPoolExecutor() as executor:
-                result = await loop.run_in_executor(
-                    executor,
-                    lambda: self._sync_chat_with_ai(messages, api_key)
-                )
+        max_retries = len(self.api_keys)  # 最多重试次数等于key的数量
+        current_retry = 0
+        
+        while current_retry < max_retries:
+            current_key_name = self.user_current_api_key[user_key]
+            api_key = self.get_current_api_key(user_key)
+            
+            if not api_key:
+                logger.error(f"DZMM插件: 当前API密钥 '{current_key_name}' 为空")
+                # 尝试切换到下一个key
+                if not self.switch_to_next_key(user_key):
+                    return "错误：所有API密钥都无效，请联系管理员检查配置"
+                current_retry += 1
+                continue
 
-            return result if result else "抱歉，没有收到AI的回复"
+            try:
+                # 在线程池中运行同步函数
+                loop = asyncio.get_event_loop()
+                with concurrent.futures.ThreadPoolExecutor() as executor:
+                    result, is_key_error = await loop.run_in_executor(
+                        executor,
+                        lambda: self._sync_chat_with_ai(messages, api_key)
+                    )
 
-        except Exception as e:
-            logger.error(f"DZMM插件: 调用AI接口时发生错误: {str(e)}")
-            return f"调用AI接口时发生错误: {str(e)}"
+                if result:
+                    # 成功获得回复，重置当前key的失败计数
+                    self.api_key_failures[current_key_name] = 0
+                    return result
+                elif is_key_error:
+                    # 是密钥相关错误，增加失败计数并尝试切换key
+                    self.api_key_failures[current_key_name] += 1
+                    logger.warning(f"DZMM插件: API密钥 '{current_key_name}' 失败次数: {self.api_key_failures[current_key_name]}")
+                    
+                    # 如果失败次数达到阈值，尝试切换key
+                    if self.api_key_failures[current_key_name] >= self.max_failures_before_switch:
+                        if self.switch_to_next_key(user_key):
+                            logger.info(f"DZMM插件: 因连续失败已自动切换API密钥")
+                        else:
+                            logger.warning(f"DZMM插件: 无法切换到其他API密钥")
+                    
+                    current_retry += 1
+                    continue
+                else:
+                    # 非密钥错误，直接返回失败
+                    return "抱歉，AI服务暂时不可用，请稍后再试"
+
+            except Exception as e:
+                logger.error(f"DZMM插件: 调用AI接口时发生错误: {str(e)}")
+                # 对于未知错误，也尝试切换key
+                self.api_key_failures[current_key_name] += 1
+                if self.api_key_failures[current_key_name] >= self.max_failures_before_switch:
+                    self.switch_to_next_key(user_key)
+                current_retry += 1
+                continue
+        
+        # 所有重试都失败了
+        return "抱歉，所有API密钥都暂时不可用，请稍后再试或联系管理员"
 
     @command("dzmm")
     async def dzmm_chat(self, event: AstrMessageEvent, content: str = None):
@@ -291,8 +444,9 @@ class PluginDzmm(Star):
                 "\n管理命令：\n"
                 "/dzmm_personas - 列出所有角色\n"
                 "/dzmm_persona [角色名] - 切换角色\n"
-                "/dzmm_keyls - 列出所有API密钥\n"
+                "/dzmm_keyls - 列出所有API密钥及状态\n"
                 "/dzmm_key [密钥名] - 切换API密钥\n"
+                "/dzmm_resetkeys - 重置API密钥失败计数\n"
                 "/dzmm_status - 显示当前状态\n"
                 "/dzmm_clear - 清除聊天上下文"
             )
@@ -314,10 +468,16 @@ class PluginDzmm(Star):
                 "\n管理命令：\n"
                 "• /dzmm_personas - 列出所有可用角色\n"
                 "• /dzmm_persona [角色名] - 切换到指定角色\n"
-                "• /dzmm_keyls - 列出所有可用API密钥\n"
+                "• /dzmm_keyls - 列出所有API密钥及状态\n"
                 "• /dzmm_key [密钥名] - 切换到指定API密钥\n"
+                "• /dzmm_resetkeys - 重置API密钥失败计数\n"
                 "• /dzmm_status - 显示当前状态\n"
                 "• /dzmm_clear - 清除聊天上下文\n\n"
+                "🔄 自动切换功能：\n"
+                f"• 当API密钥连续失败{self.max_failures_before_switch}次时自动切换\n"
+                "• 切换过程对用户透明，无需手动干预\n"
+                "• 使用 /dzmm_keyls 查看密钥状态\n"
+                "• 每天凌晨1点自动重置失败计数\n\n"
                 f"当前配置：\n"
                 f"• 上下文长度：{self.context_length}条消息\n"
                 f"• 模型：{self.model}\n"
@@ -397,12 +557,21 @@ class PluginDzmm(Star):
 
     @command("dzmm_keyls")
     async def dzmm_keyls(self, event: AstrMessageEvent):
-        """列出所有可用API密钥"""
+        """列出所有API密钥及其使用状态"""
         user_key = self.get_user_key(event)
 
-        key_list = "\n".join([f"• {name}" for name in self.api_keys.keys()])
+        key_status_list = []
+        for name in self.api_keys.keys():
+            failure_count = self.api_key_failures.get(name, 0)
+            if failure_count < self.max_failures_before_switch:
+                status = f"🟢正常（失败次数：{failure_count}/{failure_count}）"
+            else:
+                status = f"🔴无效（失败次数：{failure_count}/{failure_count}）"
+            key_status_list.append(f"• {name} - {status}")
+        
+        key_list = "\n".join(key_status_list)
         current_key = self.user_current_api_key[user_key]
-        yield event.plain_result(f"可用API密钥列表：\n{key_list}\n\n当前使用密钥：{current_key}")
+        yield event.plain_result(f"API密钥状态列表：\n{key_list}\n\n当前使用密钥：{current_key}\n\n说明：失败{self.max_failures_before_switch}次后密钥将被禁用并自动切换下一个密钥。密钥将会在次日01:00重置为可用。")
 
     @command("dzmm_key")
     async def dzmm_key(self, event: AstrMessageEvent, key_name: str = None):
@@ -466,3 +635,12 @@ class PluginDzmm(Star):
 
         self.user_contexts[user_key].clear()
         yield event.plain_result("✅ 已清除聊天上下文")
+    
+
+    
+    @command("dzmm_resetkeys")
+    async def dzmm_resetkeys(self, event: AstrMessageEvent):
+        """重置所有API密钥的失败计数"""
+        self.api_key_failures.clear()
+        logger.info("DZMM插件: 手动重置了所有API密钥的失败计数")
+        yield event.plain_result("✅ 已重置所有API密钥的失败计数，所有密钥现在都可用")

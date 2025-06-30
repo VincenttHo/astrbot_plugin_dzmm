@@ -64,5 +64,11 @@
         "type": "bool",
         "default": true,
         "hint": "是否在群聊中让所有成员共享聊天上下文"
+    },
+    "max_failures_before_switch": {
+        "description": "自动切换API密钥的失败阈值",
+        "type": "int",
+        "default": 3,
+        "hint": "当API密钥连续失败多少次后自动切换到下一个密钥（1-10之间）"
     }
 }
