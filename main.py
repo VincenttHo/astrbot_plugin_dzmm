@@ -25,12 +25,15 @@ import threading
 import time
 from datetime import datetime
 
+# 导入数据存储模块
+from .data_storage import DataStorage
+
 
 @register(
     "astrbot_plugin_dzmm",
     "Assistant",
-    "DZMM AI聊天插件，支持智能用户隔离、昵称识别、多角色和多API密钥配置，新增自动密钥切换功能",
-    "1.0.3",
+    "DZMM AI聊天插件，可以与dzmm平台的ai进行各种深度聊天",
+    "1.0.4",
     "https://github.com/VincenttHo/astrbot_plugin_dzmm",
 )
 class PluginDzmm(Star):
@@ -50,6 +53,7 @@ class PluginDzmm(Star):
         # 新增配置选项
         self.show_nickname = self.config.get("show_nickname", True)
         self.group_shared_context = self.config.get("group_shared_context", True)
+        self.enable_memory = self.config.get("enable_memory", True)
 
         # 多角色配置
         self.personas = self._parse_json_config("personas", {
@@ -72,15 +76,28 @@ class PluginDzmm(Star):
         if old_api_key and "default" not in self.api_keys:
             self.api_keys["default"] = old_api_key
 
-        # 用户上下文存储 - 使用用户ID+群组ID作为键
-        self.user_contexts: Dict[str, deque] = defaultdict(lambda: deque(maxlen=self.context_length))
-
-        # 用户当前使用的角色和API密钥
-        self.user_current_persona: Dict[str, str] = defaultdict(lambda: "default")
-        self.user_current_api_key: Dict[str, str] = defaultdict(lambda: "default")
+        # 根据配置决定是否启用记忆功能
+        if self.enable_memory:
+            # 初始化数据存储
+            self.data_storage = DataStorage("astrbot_plugin_dzmm")
+            
+            # 从存储中恢复数据
+            self.user_contexts = self.data_storage.get_user_contexts(self.context_length)
+            self.user_current_persona = self.data_storage.get_user_current_persona()
+            self.user_current_api_key = self.data_storage.get_user_current_api_key()
+            self.api_key_failures = self.data_storage.get_api_key_failures()
+            
+            logger.info("DZMM插件: 记忆功能已启用，数据将自动保存和恢复")
+        else:
+            # 不启用记忆功能，使用默认初始化
+            self.data_storage = None
+            self.user_contexts = defaultdict(lambda: deque(maxlen=self.context_length))
+            self.user_current_persona = defaultdict(lambda: "default")
+            self.user_current_api_key = defaultdict(lambda: "default")
+            self.api_key_failures = defaultdict(int)
+            
+            logger.info("DZMM插件: 记忆功能已禁用，数据不会保存")
         
-        # API密钥使用状态跟踪
-        self.api_key_failures: Dict[str, int] = defaultdict(int)  # 记录每个key的连续失败次数
         self.max_failures_before_switch = max(1, min(10, self.config.get("max_failures_before_switch", 3)))  # 连续失败多少次后切换key，限制在1-10之间
         
         # 初始化定时任务
@@ -90,9 +107,15 @@ class PluginDzmm(Star):
         if not self.api_keys or not any(self.api_keys.values()):
             logger.warning("DZMM插件: 未配置API密钥，插件将无法正常工作")
 
-        # 调试信息：输出解析后的配置
+        # 调试信息：输出解析后的配置和恢复的数据
         logger.info(f"DZMM插件: 已加载 {len(self.personas)} 个角色: {list(self.personas.keys())}")
         logger.info(f"DZMM插件: 已加载 {len(self.api_keys)} 个API密钥: {list(self.api_keys.keys())}")
+        
+        # 输出恢复的数据统计
+        stats = self.data_storage.get_storage_stats()
+        logger.info(f"DZMM插件: 已恢复 {stats['total_users']} 个用户的上下文，共 {stats['total_messages']} 条消息")
+        if stats['failed_keys'] > 0:
+            logger.info(f"DZMM插件: 恢复了 {stats['failed_keys']} 个失败的API密钥计数")
 
     def _parse_json_config(self, key: str, default_value: dict) -> dict:
         """解析JSON格式的配置项"""
@@ -176,6 +199,10 @@ class PluginDzmm(Star):
             formatted_content = content
 
         self.user_contexts[user_key].append({"role": role, "content": formatted_content})
+        
+        # 保存用户上下文到存储（如果启用记忆功能）
+        if self.enable_memory and self.data_storage:
+            self.data_storage.save_user_contexts(self.user_contexts)
 
     def get_context_messages(self, user_key: str) -> List[dict]:
         """获取用户的上下文消息"""
@@ -237,6 +264,10 @@ class PluginDzmm(Star):
             old_key = self.user_current_api_key[user_key]
             self.user_current_api_key[user_key] = next_key
             logger.info(f"DZMM插件: 自动切换API密钥 {old_key} -> {next_key}")
+            
+            # 保存用户当前API密钥到存储（如果启用记忆功能）
+            if self.enable_memory and self.data_storage:
+                self.data_storage.save_user_current_api_key(self.user_current_api_key)
             return True
         return False
     
@@ -259,6 +290,7 @@ class PluginDzmm(Star):
     def _reset_all_key_failures(self):
         """重置所有API密钥的失败计数"""
         self.api_key_failures.clear()
+        self.data_storage.clear_api_key_failures()
         logger.info(f"[{datetime.now().strftime('%Y-%m-%d %H:%M:%S')}] 已重置所有API密钥的失败计数")
 
     def _sync_chat_with_ai(self, messages: List[dict], api_key: str) -> tuple[Optional[str], bool]:
@@ -402,10 +434,14 @@ class PluginDzmm(Star):
                 if result:
                     # 成功获得回复，重置当前key的失败计数
                     self.api_key_failures[current_key_name] = 0
+                    if self.enable_memory and self.data_storage:
+                        self.data_storage.save_api_key_failures(self.api_key_failures)
                     return result
                 elif is_key_error:
                     # 是密钥相关错误，增加失败计数并尝试切换key
                     self.api_key_failures[current_key_name] += 1
+                    if self.enable_memory and self.data_storage:
+                        self.data_storage.save_api_key_failures(self.api_key_failures)
                     logger.warning(f"DZMM插件: API密钥 '{current_key_name}' 失败次数: {self.api_key_failures[current_key_name]}")
                     
                     # 如果失败次数达到阈值，尝试切换key
@@ -425,6 +461,8 @@ class PluginDzmm(Star):
                 logger.error(f"DZMM插件: 调用AI接口时发生错误: {str(e)}")
                 # 对于未知错误，也尝试切换key
                 self.api_key_failures[current_key_name] += 1
+                if self.enable_memory and self.data_storage:
+                    self.data_storage.save_api_key_failures(self.api_key_failures)
                 if self.api_key_failures[current_key_name] >= self.max_failures_before_switch:
                     self.switch_to_next_key(user_key)
                 current_retry += 1
@@ -548,6 +586,12 @@ class PluginDzmm(Star):
             self.user_current_persona[user_key] = persona_name
             # 切换角色时清除上下文，避免角色混乱
             self.user_contexts[user_key].clear()
+            
+            # 保存角色和上下文到存储（如果启用记忆功能）
+            if self.enable_memory and self.data_storage:
+                self.data_storage.save_user_current_persona(self.user_current_persona)
+                self.data_storage.save_user_contexts(self.user_contexts)
+            
             logger.info(f"DZMM插件: 成功切换到角色 '{persona_name}'")
             yield event.plain_result(f"✅ 已切换到角色：{persona_name}\n\n💡 已自动清除聊天上下文以避免角色混乱")
         else:
@@ -588,6 +632,11 @@ class PluginDzmm(Star):
 
         if key_name in self.api_keys:
             self.user_current_api_key[user_key] = key_name
+            
+            # 保存用户当前API密钥到存储（如果启用记忆功能）
+            if self.enable_memory and self.data_storage:
+                self.data_storage.save_user_current_api_key(self.user_current_api_key)
+            
             logger.info(f"DZMM插件: 成功切换到API密钥 '{key_name}'")
             yield event.plain_result(f"✅ 已切换到API密钥：{key_name}")
         else:
@@ -634,6 +683,11 @@ class PluginDzmm(Star):
         user_key = self.get_user_key(event)
 
         self.user_contexts[user_key].clear()
+        
+        # 保存清除后的上下文到存储（如果启用记忆功能）
+        if self.enable_memory and self.data_storage:
+            self.data_storage.save_user_contexts(self.user_contexts)
+        
         yield event.plain_result("✅ 已清除聊天上下文")
     
 
@@ -642,5 +696,23 @@ class PluginDzmm(Star):
     async def dzmm_resetkeys(self, event: AstrMessageEvent):
         """重置所有API密钥的失败计数"""
         self.api_key_failures.clear()
+        # 清除持久化存储中的失败计数（如果启用记忆功能）
+        if self.enable_memory and self.data_storage:
+            self.data_storage.clear_api_key_failures()
         logger.info("DZMM插件: 手动重置了所有API密钥的失败计数")
         yield event.plain_result("✅ 已重置所有API密钥的失败计数，所有密钥现在都可用")
+
+    def __del__(self):
+        """析构函数，确保数据被保存"""
+        # 保存所有数据（如果启用记忆功能）
+        if hasattr(self, 'enable_memory') and self.enable_memory and hasattr(self, 'data_storage') and self.data_storage:
+            try:
+                self.data_storage.save_all_data(
+                    self.user_contexts,
+                    self.user_current_persona,
+                    self.user_current_api_key,
+                    self.api_key_failures
+                )
+                logger.info("DZMM插件: 已保存所有数据")
+            except Exception as e:
+                logger.error(f"DZMM插件: 保存数据时发生错误: {str(e)}")

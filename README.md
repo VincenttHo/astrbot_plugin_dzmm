@@ -79,6 +79,7 @@ api_key是用于访问DZMM模型的重要配置，支持多个key配置，采用
 - **show_nickname**: 在群聊中发送给AI时显示用户昵称，默认true
 - **group_shared_context**: 群聊共享上下文，默认true
 - **max_failures_before_switch**: 自动切换API密钥的失败阈值，默认3次
+- **max_failures_before_switch**: 自动切换API密钥的失败阈值，默认3次
 
 ## 使用方法
 
@@ -203,6 +204,8 @@ api_key是用于访问DZMM模型的重要配置，支持多个key配置，采用
 
 ## 版本历史
 
+- v1.0.4: 新增持久化功能
+  - 💾 增加对聊天上下文持久化的功能，可以确保机器重启或者插件重新加载时不丢失原有聊天上下文
 - v1.0.3: 新增自动API密钥切换功能
   - 🔄 智能检测API密钥使用次数超限和认证错误
   - 🔀 自动切换到下一个可用的API密钥，对用户透明

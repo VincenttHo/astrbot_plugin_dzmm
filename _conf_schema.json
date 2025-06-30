@@ -70,5 +70,11 @@
         "type": "int",
         "default": 3,
         "hint": "当API密钥连续失败多少次后自动切换到下一个密钥（1-10之间）"
+    },
+    "enable_memory": {
+        "description": "启用聊天上下文持久化功能",
+        "type": "bool",
+        "default": true,
+        "hint": "启用上下文持久化功能后，会将聊天上下文保存到磁盘中，确保机器重启或插件重启后上下文依然存在"
     }
 }

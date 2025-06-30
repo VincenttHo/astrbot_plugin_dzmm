@@ -1,6 +1,6 @@
 name: astrbot_plugin_dzmm
-desc: DZMM聊天插件，支持智能用户隔离、昵称识别、多角色和多API密钥配置。
+desc: DZMM聊天插件，可以与dzmm平台的ai进行各种深度聊天。
 help: 输入 /dzmm [内容] 与AI聊天，支持上下文对话和自动密钥切换
-version: v1.0.3
+version: v1.0.4
 author: VincenttHo
 repo: https://github.com/VincenttHo/astrbot_plugin_dzmm
