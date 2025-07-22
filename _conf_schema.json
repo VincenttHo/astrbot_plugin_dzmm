@@ -76,5 +76,29 @@
         "type": "bool",
         "default": true,
         "hint": "启用上下文持久化功能后，会将聊天上下文保存到磁盘中，确保机器重启或插件重启后上下文依然存在"
+    },
+    "enable_auto_trigger": {
+        "description": "启用定时自动触发功能",
+        "type": "bool",
+        "default": false,
+        "hint": "启用后，会在用户长时间未使用插件时自动发送消息触发AI回复"
+    },
+    "auto_trigger_interval": {
+        "description": "自动触发间隔时间（分钟）",
+        "type": "int",
+        "default": 1440,
+        "hint": "距离用户上次使用插件多少分钟后自动触发，建议设置为360-4320分钟之间（6小时-3天）"
+    },
+    "auto_trigger_message": {
+        "description": "自动触发时发送的消息",
+        "type": "string",
+        "default": "（注：由于我很久没跟你说话，你开始寂寞，你主动找我...）",
+        "hint": "当自动触发时，会发送这条消息给AI进行回复"
+    },
+    "auto_trigger_whitelist": {
+        "description": "自动触发白名单",
+        "type": "list",
+        "default": [],
+        "hint": "只有在白名单中的私聊用户才会收到自动触发消息，直接配置用户ID列表"
     }
 }

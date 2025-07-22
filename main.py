@@ -31,9 +31,9 @@ from .data_storage import DataStorage
 
 @register(
     "astrbot_plugin_dzmm",
-    "Assistant",
+    "VincenttHo",
     "DZMM AI聊天插件，可以与dzmm平台的ai进行各种深度聊天",
-    "1.0.4",
+    "1.1.0",
     "https://github.com/VincenttHo/astrbot_plugin_dzmm",
 )
 class PluginDzmm(Star):
@@ -54,6 +54,15 @@ class PluginDzmm(Star):
         self.show_nickname = self.config.get("show_nickname", True)
         self.group_shared_context = self.config.get("group_shared_context", True)
         self.enable_memory = self.config.get("enable_memory", True)
+        
+        # 定时触发配置
+        self.enable_auto_trigger = self.config.get("enable_auto_trigger", False)
+        self.auto_trigger_interval = max(1, min(10080, self.config.get("auto_trigger_interval", 1440)))  # 限制在1-10080分钟之间（1小时-7天）
+        self.auto_trigger_message = self.config.get("auto_trigger_message", "（注：由于我很久没跟你说话，你开始寂寞，你主动找我...）")
+        self.auto_trigger_whitelist = self._parse_list_config("auto_trigger_whitelist", [])
+        
+        # 用户最后活动时间记录
+        self.user_last_activity = {}
 
         # 多角色配置
         self.personas = self._parse_json_config("personas", {
@@ -82,10 +91,24 @@ class PluginDzmm(Star):
             self.data_storage = DataStorage("astrbot_plugin_dzmm")
             
             # 从存储中恢复数据
-            self.user_contexts = self.data_storage.get_user_contexts(self.context_length)
-            self.user_current_persona = self.data_storage.get_user_current_persona()
-            self.user_current_api_key = self.data_storage.get_user_current_api_key()
-            self.api_key_failures = self.data_storage.get_api_key_failures()
+            if self.data_storage:
+                self.user_contexts = self.data_storage.get_user_contexts(self.context_length)
+                self.user_current_persona = self.data_storage.get_user_current_persona()
+                self.user_current_api_key = self.data_storage.get_user_current_api_key()
+                self.api_key_failures = self.data_storage.get_api_key_failures()
+                
+                # 恢复用户最后活动时间
+                try:
+                    self.user_last_activity = self.data_storage.get_user_last_activity()
+                except:
+                    self.user_last_activity = {}
+            else:
+                # 如果data_storage初始化失败，使用默认值
+                self.user_contexts = defaultdict(lambda: deque(maxlen=self.context_length))
+                self.user_current_persona = defaultdict(lambda: "default")
+                self.user_current_api_key = defaultdict(lambda: "default")
+                self.api_key_failures = defaultdict(int)
+                self.user_last_activity = {}
             
             logger.info("DZMM插件: 记忆功能已启用，数据将自动保存和恢复")
         else:
@@ -102,6 +125,12 @@ class PluginDzmm(Star):
         
         # 初始化定时任务
         self._init_scheduler()
+        
+        # 启动定时触发任务（如果启用）
+        self.auto_trigger_task = None
+        if self.enable_auto_trigger:
+            self.auto_trigger_task = asyncio.create_task(self._auto_trigger_task())
+            logger.info(f"DZMM插件: 定时触发功能已启用，间隔时间: {self.auto_trigger_interval}分钟")
 
         # 验证API密钥
         if not self.api_keys or not any(self.api_keys.values()):
@@ -112,10 +141,14 @@ class PluginDzmm(Star):
         logger.info(f"DZMM插件: 已加载 {len(self.api_keys)} 个API密钥: {list(self.api_keys.keys())}")
         
         # 输出恢复的数据统计
-        stats = self.data_storage.get_storage_stats()
-        logger.info(f"DZMM插件: 已恢复 {stats['total_users']} 个用户的上下文，共 {stats['total_messages']} 条消息")
-        if stats['failed_keys'] > 0:
-            logger.info(f"DZMM插件: 恢复了 {stats['failed_keys']} 个失败的API密钥计数")
+        if self.enable_memory and self.data_storage:
+            stats = self.data_storage.get_storage_stats()
+            logger.info(f"DZMM插件: 已恢复 {stats['total_users']} 个用户的上下文，共 {stats['total_messages']} 条消息")
+            if stats['failed_keys'] > 0:
+                logger.info(f"DZMM插件: 恢复了 {stats['failed_keys']} 个失败的API密钥计数")
+        
+        # 初始化白名单用户的最后活动时间
+        self._init_whitelist_activity()
 
     def _parse_json_config(self, key: str, default_value: dict) -> dict:
         """解析JSON格式的配置项"""
@@ -144,6 +177,62 @@ class PluginDzmm(Star):
 
         logger.warning(f"DZMM插件: 配置项 {key} 格式不正确，使用默认值")
         return default_value
+
+    def _parse_list_config(self, key: str, default_value: list) -> list:
+        """解析列表格式的配置项，支持直接的list类型和JSON字符串格式"""
+        import json
+
+        config_value = self.config.get(key)
+        if not config_value:
+            return default_value
+
+        # 如果已经是列表类型，直接返回（astrbot原生支持）
+        if isinstance(config_value, list):
+            return config_value
+
+        # 如果是字符串，尝试解析JSON
+        if isinstance(config_value, str):
+            try:
+                parsed = json.loads(config_value)
+                if isinstance(parsed, list):
+                    return parsed
+                else:
+                    logger.warning(f"DZMM插件: 配置项 {key} 不是有效的JSON数组，使用默认值")
+                    return default_value
+            except json.JSONDecodeError as e:
+                logger.warning(f"DZMM插件: 配置项 {key} JSON解析失败: {str(e)}，使用默认值")
+                return default_value
+
+        logger.warning(f"DZMM插件: 配置项 {key} 格式不正确，使用默认值")
+        return default_value
+
+    def _init_whitelist_activity(self):
+        """初始化白名单用户的最后活动时间"""
+        if not self.enable_auto_trigger or not self.auto_trigger_whitelist:
+            return
+        
+        current_time = datetime.now().timestamp()
+        updated_count = 0
+        
+        for whitelist_entry in self.auto_trigger_whitelist:
+            whitelist_entry = "aiocqhttp_private_" + whitelist_entry
+            if whitelist_entry not in self.user_last_activity:
+                self.user_last_activity[whitelist_entry] = current_time
+                updated_count += 1
+                logger.info(f"DZMM插件: 为白名单用户 {whitelist_entry} 初始化最后活动时间")
+        
+        if updated_count > 0:
+            logger.info(f"DZMM插件: 已为 {updated_count} 个白名单用户初始化最后活动时间")
+            
+            # 持久化保存
+            if self.enable_memory and self.data_storage:
+                try:
+                    self.data_storage.save_user_last_activity(self.user_last_activity)
+                    logger.info("DZMM插件: 白名单用户活动时间已保存到存储")
+                except Exception as e:
+                    logger.error(f"DZMM插件: 保存白名单用户活动时间失败: {str(e)}")
+        else:
+            logger.info("DZMM插件: 所有白名单用户的最后活动时间已存在，无需初始化")
 
     def get_user_key(self, event: AstrMessageEvent) -> str:
         """生成用户唯一标识
@@ -200,9 +289,16 @@ class PluginDzmm(Star):
 
         self.user_contexts[user_key].append({"role": role, "content": formatted_content})
         
+        # 更新用户最后活动时间（仅当是用户消息时）
+        if role == "user":
+            self.user_last_activity[user_key] = datetime.now().timestamp()
+        
         # 保存用户上下文到存储（如果启用记忆功能）
         if self.enable_memory and self.data_storage:
             self.data_storage.save_user_contexts(self.user_contexts)
+            # 保存用户最后活动时间
+            if role == "user":
+                self.data_storage.save_user_last_activity(self.user_last_activity)
 
     def get_context_messages(self, user_key: str) -> List[dict]:
         """获取用户的上下文消息"""
@@ -290,8 +386,90 @@ class PluginDzmm(Star):
     def _reset_all_key_failures(self):
         """重置所有API密钥的失败计数"""
         self.api_key_failures.clear()
-        self.data_storage.clear_api_key_failures()
+        if self.enable_memory and self.data_storage:
+            self.data_storage.clear_api_key_failures()
         logger.info(f"[{datetime.now().strftime('%Y-%m-%d %H:%M:%S')}] 已重置所有API密钥的失败计数")
+    
+    async def _auto_trigger_task(self):
+        """定时触发任务"""
+        while True:
+            try:
+                await self._execute_auto_trigger(False)
+            except Exception as e:
+                logger.error(f"DZMM插件: 定时触发任务发生错误: {str(e)}")
+                await asyncio.sleep(300)  # 出错时等待5分钟再继续
+    
+    async def _execute_auto_trigger(self, is_test):
+        """执行定时触发"""
+        trigger_threshold = self.auto_trigger_interval * 60  # 转换为秒（分钟*60）
+
+        if not is_test:
+            await asyncio.sleep(trigger_threshold - 10)
+        
+        if not self.enable_auto_trigger:
+            return
+        
+        current_time = datetime.now().timestamp()
+        
+        # 检查每个用户的最后活动时间
+        for user_key, last_activity in list(self.user_last_activity.items()):
+            # 只处理私聊用户
+            if "_private_" not in user_key:
+                continue
+            
+            # 提取用户ID进行白名单检查
+            user_id = user_key.split("_private_")[-1]
+            if not self.auto_trigger_whitelist or user_id not in self.auto_trigger_whitelist:
+                continue
+            
+            # 检查是否超过触发间隔
+            if current_time - last_activity >= trigger_threshold:
+                await self._send_auto_trigger_message(user_key)
+                # 更新最后活动时间，避免重复触发
+                self.user_last_activity[user_key] = current_time
+                if self.enable_memory and self.data_storage:
+                    self.data_storage.save_user_last_activity(self.user_last_activity)
+                
+    async def _send_auto_trigger_message(self, user_key: str):
+        """发送定时触发消息"""
+        try:
+            # 构造unified_msg_origin
+            platform, chat_type, user_id = user_key.split("_", 2)
+            # 根据AstrBot框架的MessageType，private应该是FriendMessage
+            if chat_type == "private":
+                message_type = "FriendMessage"
+            elif chat_type == "group":
+                message_type = "GroupMessage"
+            else:
+                message_type = chat_type  # 保持原值作为fallback
+            unified_msg_origin = f"{platform}:{message_type}:{user_id}"
+            
+            # 添加触发消息到上下文
+            self.add_to_context(user_key, "user", self.auto_trigger_message)
+            
+            # 获取完整的消息列表
+            messages = self.get_context_messages(user_key)
+            
+            # 调用AI接口
+            ai_response = await self.chat_with_ai(messages, user_key)
+            
+            if ai_response:
+                # 添加AI回复到上下文
+                self.add_to_context(user_key, "assistant", ai_response)
+                
+                # 发送消息
+                from astrbot.api.event import MessageChain
+                message_chain = MessageChain().message(ai_response)
+                await self.context.send_message(unified_msg_origin, message_chain)
+                
+                logger.info(f"DZMM插件: 成功发送定时触发回复给用户 {user_key}")
+            else:
+                logger.warning(f"DZMM插件: 定时触发时AI无法回复，用户: {user_key}")
+                
+        except Exception as e:
+            logger.error(f"DZMM插件: 发送定时触发消息时发生错误: {str(e)}")
+            import traceback
+            logger.error(traceback.format_exc())
 
     def _sync_chat_with_ai(self, messages: List[dict], api_key: str) -> tuple[Optional[str], bool]:
         """同步版本的AI聊天函数，支持完整的消息历史
@@ -498,6 +676,16 @@ class PluginDzmm(Star):
 
         # 处理特殊命令
         if content.lower() == "help":
+            trigger_help = ""
+            if self.enable_auto_trigger:
+                trigger_help = (
+                    "\n⏰ 定时触发功能：\n"
+                    "• /dzmm_trigger_status - 查看定时触发状态\n"
+                    "• /dzmm_trigger_test - 测试定时触发功能\n"
+                    f"• 触发间隔：{self.auto_trigger_interval}小时\n"
+                    "• 仅对私聊白名单用户有效\n"
+                )
+            
             yield event.plain_result(
                 "DZMM AI聊天插件帮助：\n"
                 "\n基础命令：\n"
@@ -510,7 +698,8 @@ class PluginDzmm(Star):
                 "• /dzmm_key [密钥名] - 切换到指定API密钥\n"
                 "• /dzmm_resetkeys - 重置API密钥失败计数\n"
                 "• /dzmm_status - 显示当前状态\n"
-                "• /dzmm_clear - 清除聊天上下文\n\n"
+                "• /dzmm_clear - 清除聊天上下文\n"
+                f"{trigger_help}\n"
                 "🔄 自动切换功能：\n"
                 f"• 当API密钥连续失败{self.max_failures_before_switch}次时自动切换\n"
                 "• 切换过程对用户透明，无需手动干预\n"
@@ -701,9 +890,62 @@ class PluginDzmm(Star):
             self.data_storage.clear_api_key_failures()
         logger.info("DZMM插件: 手动重置了所有API密钥的失败计数")
         yield event.plain_result("✅ 已重置所有API密钥的失败计数，所有密钥现在都可用")
+    
+    @command("dzmm_trigger_status")
+    async def dzmm_trigger_status(self, event: AstrMessageEvent):
+        """显示定时触发功能状态"""
+        if not self.enable_auto_trigger:
+            yield event.plain_result("❌ 定时触发功能未启用")
+            return
+        
+        user_key = self.get_user_key(event)
+        user_id = event.get_sender_id()
+        
+        # 检查是否为私聊
+        group_id = event.get_group_id()
+        if group_id and group_id != "private":
+            yield event.plain_result("⚠️ 定时触发功能仅在私聊中有效")
+            return
+        
+        # 检查白名单状态
+        in_whitelist = user_id in self.auto_trigger_whitelist if self.auto_trigger_whitelist else False
+        whitelist_status = "✅ 已加入" if in_whitelist else "❌ 未加入"
+        
+        # 获取最后活动时间
+        last_activity = self.user_last_activity.get(user_key)
+        if last_activity:
+            last_activity_str = datetime.fromtimestamp(last_activity).strftime("%Y-%m-%d %H:%M:%S")
+            minutes_since = (datetime.now().timestamp() - last_activity) / 60
+            next_trigger_minutes = max(0, self.auto_trigger_interval - minutes_since)
+        else:
+            last_activity_str = "无记录"
+            next_trigger_minutes = 0
+        
+        yield event.plain_result(
+            f"定时触发功能状态：\n"
+            f"• 功能状态：✅ 已启用\n"
+            f"• 触发间隔：{self.auto_trigger_interval}分钟\n"
+            f"• 白名单状态：{whitelist_status}\n"
+            f"• 最后活动时间：{last_activity_str}\n"
+            f"• 下次触发时间：{next_trigger_minutes:.1f}分钟后\n"
+            f"• 触发消息：{self.auto_trigger_message}\n\n"
+            f"💡 只有私聊且在白名单中的用户才会收到定时触发消息"
+        )
 
-    def __del__(self):
-        """析构函数，确保数据被保存"""
+    async def terminate(self):
+        """插件卸载/停用时调用，用于清理资源"""
+        logger.info("DZMM插件: 开始清理资源...")
+        
+        # 取消定时触发任务
+        if hasattr(self, 'auto_trigger_task') and self.auto_trigger_task and not self.auto_trigger_task.done():
+            self.auto_trigger_task.cancel()
+            try:
+                await self.auto_trigger_task
+            except asyncio.CancelledError:
+                logger.info("DZMM插件: 定时触发任务已取消")
+            except Exception as e:
+                logger.error(f"DZMM插件: 取消定时触发任务时发生错误: {str(e)}")
+        
         # 保存所有数据（如果启用记忆功能）
         if hasattr(self, 'enable_memory') and self.enable_memory and hasattr(self, 'data_storage') and self.data_storage:
             try:
@@ -711,8 +953,36 @@ class PluginDzmm(Star):
                     self.user_contexts,
                     self.user_current_persona,
                     self.user_current_api_key,
-                    self.api_key_failures
+                    self.api_key_failures,
+                    user_last_activity=self.user_last_activity
                 )
                 logger.info("DZMM插件: 已保存所有数据")
             except Exception as e:
                 logger.error(f"DZMM插件: 保存数据时发生错误: {str(e)}")
+        
+        logger.info("DZMM插件: 资源清理完成")
+
+    def __del__(self):
+        """析构函数，确保数据被保存并清理资源"""
+        logger.info("DZMM插件: 开始清理资源...")
+        
+        # 取消定时触发任务
+        if hasattr(self, 'auto_trigger_task') and self.auto_trigger_task and not self.auto_trigger_task.done():
+            self.auto_trigger_task.cancel()
+            logger.info("DZMM插件: 定时触发任务已取消")
+        
+        # 保存所有数据（如果启用记忆功能）
+        if hasattr(self, 'enable_memory') and self.enable_memory and hasattr(self, 'data_storage') and self.data_storage:
+            try:
+                self.data_storage.save_all_data(
+                    self.user_contexts,
+                    self.user_current_persona,
+                    self.user_current_api_key,
+                    self.api_key_failures,
+                    user_last_activity=self.user_last_activity
+                )
+                logger.info("DZMM插件: 已保存所有数据")
+            except Exception as e:
+                logger.error(f"DZMM插件: 保存数据时发生错误: {str(e)}")
+        
+        logger.info("DZMM插件: 资源清理完成")

@@ -26,8 +26,9 @@ class DataStorage:
             "user_current_persona": {},
             "user_current_api_key": {},
             "api_key_failures": {},
+            "user_last_activity": {},
             "last_save_time": None,
-            "version": "1.0.0"
+            "version": "1.0.1"
         }
         
         # 加载已保存的数据
@@ -91,7 +92,7 @@ class DataStorage:
         save_thread = threading.Thread(target=save_worker, daemon=True)
         save_thread.start()
     
-    def save_all_data(self, user_contexts, user_current_persona, user_current_api_key, api_key_failures):
+    def save_all_data(self, user_contexts, user_current_persona, user_current_api_key, api_key_failures, user_last_activity=None):
         """保存所有数据"""
         # 将deque转换为list进行JSON序列化
         contexts_data = {}
@@ -102,6 +103,8 @@ class DataStorage:
         self.data["user_current_persona"] = dict(user_current_persona)
         self.data["user_current_api_key"] = dict(user_current_api_key)
         self.data["api_key_failures"] = dict(api_key_failures)
+        if user_last_activity is not None:
+            self.data["user_last_activity"] = dict(user_last_activity)
         
         # 立即保存到文件
         self.save_data()
@@ -163,6 +166,16 @@ class DataStorage:
     def clear_api_key_failures(self):
         """清除所有API密钥失败计数"""
         self.data["api_key_failures"] = {}
+        # 立即异步保存到文件
+        self._async_save()
+    
+    def get_user_last_activity(self) -> Dict[str, str]:
+        """获取用户最后活动时间"""
+        return dict(self.data.get("user_last_activity", {}))
+    
+    def save_user_last_activity(self, user_last_activity: Dict[str, str]):
+        """保存用户最后活动时间"""
+        self.data["user_last_activity"] = dict(user_last_activity)
         # 立即异步保存到文件
         self._async_save()
     
