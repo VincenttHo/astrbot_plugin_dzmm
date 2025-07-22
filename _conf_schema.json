@@ -100,5 +100,23 @@
         "type": "list",
         "default": [],
         "hint": "只有在白名单中的私聊用户才会收到自动触发消息，直接配置用户ID列表"
+    },
+    "enable_enhanced_interaction": {
+        "description": "启用强化交互功能",
+        "type": "bool",
+        "default": false,
+        "hint": "启用后，私聊时无需命令前缀即可聊天，群聊时被@后也可直接聊天，但不会与其他命令冲突"
+    },
+    "enhanced_interaction_group_whitelist": {
+        "description": "启用强化交互功能的群聊白名单",
+        "type": "list",
+        "default": [],
+        "hint": "启用强化交互功能的群聊的白名单，只有配置了的才会生效"
+    },
+    "group_reply_probability": {
+        "description": "群聊随机回复概率",
+        "type": "float",
+        "default": 0.02,
+        "hint": "机器人随机回复群友消息的概率，范围0-1，0表示从不随机回复，1表示总是回复"
     }
 }

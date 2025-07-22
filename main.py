@@ -23,6 +23,7 @@ import concurrent.futures
 import schedule
 import threading
 import time
+import random
 from datetime import datetime
 
 # 导入数据存储模块
@@ -63,6 +64,18 @@ class PluginDzmm(Star):
         
         # 用户最后活动时间记录
         self.user_last_activity = {}
+
+        # 增强交互配置
+        self.enable_enhanced_interaction = self.config.get("enable_enhanced_interaction", False)
+        self.enhanced_interaction_group_whitelist = self.config.get("enhanced_interaction_group_whitelist", [])
+        self.group_reply_probability = self.config.get("group_reply_probability", 0.02)
+        self.enhanced_interaction_blacklist_keyword = ['help', 'status', 'clear', 'reset', 'switch', 'config',
+                    'setu', 'music', 'weather', 'search', 'translate',
+                    'humanoid_status', 'humanoid_clear', 'humanoid_whitelist',
+                    'humanoid_switch_key', 'humanoid_reset_keys', 'dorotoday',
+                    'dzmm', 'dzmm_clear', 'dzmm_status', 'dzmm_persona', 'dzmm_personas', 'dzmm_keyls',
+                    'dzmm_keys', 'bs'
+        ]
 
         # 多角色配置
         self.personas = self._parse_json_config("personas", {
@@ -986,3 +999,56 @@ class PluginDzmm(Star):
                 logger.error(f"DZMM插件: 保存数据时发生错误: {str(e)}")
         
         logger.info("DZMM插件: 资源清理完成")
+
+    # 消息处理器 - 使用事件装饰器注册
+    @event_message_type(EventMessageType.ALL)
+    async def on_message(self, event: AstrMessageEvent) -> MessageEventResult:
+        """消息事件处理器 - 当收到消息时触发"""
+        if(self.enable_enhanced_interaction):
+            message = event.get_message_str()
+            logger.info(f"DZMM插件: 拦截所有消息：{message}")
+            async for result in self.handle_message(event, message):
+                yield result
+
+    async def handle_message(self, event: AstrMessageEvent, message: str):
+        """处理消息"""
+
+        if not message:
+            return
+
+        first_str = message.split()[0].lower()
+        if(first_str in self.enhanced_interaction_blacklist_keyword):
+            logger.info(f"DZMM插件: 拦截到黑名单关键字：{message}。不处理消息")
+            return
+
+        group_id = event.get_group_id()
+
+        if group_id and group_id != "private":
+            if self.can_reply_group_message(event, group_id):
+                logger.info(f"DZMM插件: 群聊：{group_id}符合回复条件，开始处理消息")
+                async for result in self.dzmm_chat(event, message):
+                    yield result
+            else:
+                logger.info(f"DZMM插件: 群聊：{group_id}不在白名单中，不处理消息")
+        else:
+            logger.info(f"DZMM插件: 私聊，进行处理")
+            async for result in self.dzmm_chat(event, message):
+                yield result
+
+    def can_reply_group_message(self, event: AstrMessageEvent, group_id: str) -> bool:
+        """判断是否应该回复群聊消息"""
+        is_at_or_wake_command = event.is_at_or_wake_command
+        logger.info(f"是否艾特或唤醒：{is_at_or_wake_command}")
+        if is_at_or_wake_command:
+            return True
+        
+        in_whitelist = group_id in self.enhanced_interaction_group_whitelist
+        logger.info(f"是否白名单：{in_whitelist}")
+        random_value = random.random()
+        should_reply = random_value < self.group_reply_probability
+        logger.info(f"是否随机回复：{should_reply}")
+        if in_whitelist and should_reply:
+            return True
+        else:
+            return False
+        
