@@ -26,7 +26,7 @@
     "model": {
         "description": "使用的模型",
         "type": "string",
-        "default": "nalang-turbo-v23",
+        "default": "nalang-turbo-0826",
         "hint": "要使用的AI模型名称"
     },
     "temperature": {
