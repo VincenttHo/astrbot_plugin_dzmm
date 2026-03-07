@@ -100,5 +100,11 @@
         "type": "list",
         "default": [],
         "hint": "只有在白名单中的私聊用户才会收到自动触发消息，直接配置用户ID列表"
+    },
+    "reply_to_at": {
+        "description": "接受at",
+        "type": "bool",
+        "default": false,
+        "hint": "bot被at时是否回复消息"
     }
 }

@@ -1,7 +1,9 @@
 from astrbot.api.event import AstrMessageEvent
+from astrbot.api.event import filter
 from astrbot.api.star import Context, Star, register
 from astrbot.api import logger
 from astrbot.api.all import *
+import astrbot.api.message_components as Comp
 
 # 尝试导入command装饰器
 try:
@@ -54,6 +56,7 @@ class PluginDzmm(Star):
         self.show_nickname = self.config.get("show_nickname", True)
         self.group_shared_context = self.config.get("group_shared_context", True)
         self.enable_memory = self.config.get("enable_memory", True)
+        self.reply_to_at = self.config.get("reply_to_at", False)
         
         # 定时触发配置
         self.enable_auto_trigger = self.config.get("enable_auto_trigger", False)
@@ -742,6 +745,30 @@ class PluginDzmm(Star):
             logger.error(f"DZMM插件: 处理聊天时发生错误: {str(e)}")
             yield event.plain_result(f"处理聊天时发生错误: {str(e)}")
 
+    @filter.event_message_type(filter.EventMessageType.GROUP_MESSAGE)
+    async def handle_message(self, event: AstrMessageEvent, content: str = None):
+        if not self.reply_to_at:
+            return
+        msg_obj = event.message_obj
+        bot_id = msg_obj.self_id
+        is_at_me = False
+        for comp in msg_obj.message:
+            # 判断消息是否At了机器人
+            if isinstance(comp, Comp.At):
+                if str(comp.qq) == str(bot_id):
+                    is_at_me = True
+                    break
+        if not is_at_me:
+            return
+        #手动构建不含replay和at的消息文本
+        if not content or content.strip() == "":
+            content = ""
+            for msg_obj in event.message_obj.message:
+                if msg_obj.type == "Plain":
+                    content += msg_obj.text
+        async for result in self.dzmm_chat(event, content):
+            yield result
+                
     @command("dzmm_personas")
     async def dzmm_personas(self, event: AstrMessageEvent):
         """列出所有可用角色"""
