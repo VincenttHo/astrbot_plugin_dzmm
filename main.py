@@ -35,7 +35,7 @@ from .data_storage import DataStorage
     "astrbot_plugin_dzmm",
     "VincenttHo",
     "DZMM AI聊天插件，可以与dzmm平台的ai进行各种深度聊天",
-    "1.1.0",
+    "1.1.1",
     "https://github.com/VincenttHo/astrbot_plugin_dzmm",
 )
 class PluginDzmm(Star):
