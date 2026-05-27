@@ -51,7 +51,7 @@ api_key是用于访问DZMM模型的重要配置，支持多个key配置，采用
   "premium": "your-premium-key-here"
 }
 ```
-🔔 **注意：key请在DZMM官网获取，获取界面在“充值”-“API”中**
+🔔 **注意：key请在DZMM官网获取，获取界面在“我的”-“API”中**
 
 #### 多角色配置 (personas)
 在astrbot配置界面中，personas字段应该填入JSON字符串：
