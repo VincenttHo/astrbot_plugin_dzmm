@@ -7,7 +7,7 @@
 
 # astrbot_plugin_dzmm
 
-DZMM聊天插件，支持上下文对话和自定义配置。默认使用dzmm的免费试用模型nalang-turbo-v23，能每天50条消息。
+DZMM聊天插件，支持上下文对话和自定义配置。默认使用dzmm的免费试用模型nalang-turbo-0826，能每天50条消息。
 
 ## DZMM是什么？
 
