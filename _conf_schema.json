@@ -20,7 +20,7 @@
     "api_url": {
         "description": "API接口地址",
         "type": "string",
-        "default": "https://www.gpt4novel.com/api/xiaoshuoai/ext/v1/chat/completions",
+        "default": "https://api.sillytraven.dev/api/ai/v1/chat/completions",
         "hint": "OpenAI兼容的API接口地址"
     },
     "model": {
